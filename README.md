@@ -34,3 +34,13 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+
+## Demo Access
+
+The app includes local demo login accounts so it works without an external backend:
+
+- `admin@legalpro.com` / `admin123`
+- `lawyer@legalpro.com` / `lawyer123`
+- `staff@legalpro.com` / `staff123`
+
+If you do have a backend, set `NEXT_PUBLIC_API_BASE_URL` before deploying. Otherwise the app falls back to the built-in demo mode and local API routes.

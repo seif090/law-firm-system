@@ -1,48 +1,63 @@
 'use client';
 
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Legend } from 'recharts';
-
-const demoChartData = [
-  { name: 'يناير', cases: 35, clients: 20 },
-  { name: 'فبراير', cases: 42, clients: 26 },
-  { name: 'مارس', cases: 31, clients: 29 },
-  { name: 'أبريل', cases: 48, clients: 34 },
-  { name: 'مايو', cases: 55, clients: 38 },
-  { name: 'يونيو', cases: 50, clients: 44 },
-];
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Legend,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { caseTrendData, getStatusBreakdown } from '@/lib/legal-dashboard-data';
 
 export default function DashboardCharts() {
-  return (
-    <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-      <div className="p-4 rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
-        <h3 className="text-lg font-semibold mb-2">نموذج المخطط البياني للقضايا</h3>
-        <ResponsiveContainer width="100%" height={260}>
-          <LineChart data={demoChartData} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" />
-            <XAxis dataKey="name" />
-            <YAxis />
-            <Tooltip />
-            <Legend />
-            <Line type="monotone" dataKey="cases" stroke="#3b82f6" strokeWidth={2} activeDot={{ r: 6 }} />
-            <Line type="monotone" dataKey="clients" stroke="#10b981" strokeWidth={2} />
-          </LineChart>
-        </ResponsiveContainer>
-      </div>
+  const statusBreakdown = getStatusBreakdown();
 
-      <div className="p-4 rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
-        <h3 className="text-lg font-semibold mb-2">بيانات العملاء والقضايا شهرياً</h3>
-        <ResponsiveContainer width="100%" height={260}>
-          <BarChart data={demoChartData} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" />
-            <XAxis dataKey="name" />
-            <YAxis />
-            <Tooltip />
-            <Legend />
-            <Bar dataKey="cases" fill="#3b82f6" />
-            <Bar dataKey="clients" fill="#10b981" />
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
+  return (
+    <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+      <Card className="border-slate-200/80 bg-white/90 shadow-lg dark:border-slate-800 dark:bg-slate-900">
+        <CardHeader>
+          <CardTitle className="text-lg text-slate-950 dark:text-white">نمو القضايا والعملاء</CardTitle>
+          <CardDescription>اتجاهات عرضية توضح كيف تتغير المحفظة عبر الأشهر.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ResponsiveContainer width="100%" height={280}>
+            <LineChart data={caseTrendData} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(148, 163, 184, 0.25)" />
+              <XAxis dataKey="name" tickLine={false} axisLine={false} />
+              <YAxis tickLine={false} axisLine={false} />
+              <Tooltip />
+              <Legend />
+              <Line type="monotone" dataKey="cases" stroke="#0f172a" strokeWidth={2.5} activeDot={{ r: 6 }} />
+              <Line type="monotone" dataKey="clients" stroke="#0284c7" strokeWidth={2.5} />
+            </LineChart>
+          </ResponsiveContainer>
+        </CardContent>
+      </Card>
+
+      <Card className="border-slate-200/80 bg-white/90 shadow-lg dark:border-slate-800 dark:bg-slate-900">
+        <CardHeader>
+          <CardTitle className="text-lg text-slate-950 dark:text-white">توزيع حالات القضايا</CardTitle>
+          <CardDescription>مقارنة سريعة بين الملفات الجارية والمعلقة والمغلقة.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ResponsiveContainer width="100%" height={280}>
+            <BarChart data={statusBreakdown} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(148, 163, 184, 0.25)" />
+              <XAxis dataKey="name" tickLine={false} axisLine={false} />
+              <YAxis tickLine={false} axisLine={false} />
+              <Tooltip />
+              <Legend />
+              <Bar dataKey="value" fill="#0f172a" radius={[8, 8, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </CardContent>
+      </Card>
     </div>
   );
 }
