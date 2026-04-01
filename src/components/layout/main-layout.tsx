@@ -38,6 +38,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const [gotoModalOpen, setGotoModalOpen] = useState(false);
   const [gotoQuery, setGotoQuery] = useState('');
   const [selectedGotoIndex, setSelectedGotoIndex] = useState(0);
+  const [newEntityModalOpen, setNewEntityModalOpen] = useState<null | 'case' | 'client'>(null);
+  const [newEntityTitle, setNewEntityTitle] = useState('');
+  const [newEntityDetails, setNewEntityDetails] = useState('');
 
   const router = useRouter();
   const pathname = usePathname();
@@ -59,7 +62,33 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   }, [isDarkMode]);
 
   useEffect(() => {
-    const fetchNotifications = async () => {
+    const savedMenu = localStorage.getItem('lawpro-mobileMenuOpen');
+    const savedCollapsed = localStorage.getItem('lawpro-collapsedGroups');
+
+    if (savedMenu !== null) {
+      setIsMobileMenuOpen(savedMenu === 'true');
+    }
+
+    if (savedCollapsed) {
+      try {
+        const parsed = JSON.parse(savedCollapsed) as Record<string, boolean>;
+        setCollapsedGroups(parsed);
+      } catch (error) {
+        console.warn('فشل تحليل collapsedGroups من localStorage', error);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem('lawpro-mobileMenuOpen', String(isMobileMenuOpen));
+  }, [isMobileMenuOpen]);
+
+  useEffect(() => {
+    localStorage.setItem('lawpro-collapsedGroups', JSON.stringify(collapsedGroups));
+  }, [collapsedGroups]);
+
+  useEffect(() => {
+    const updateNotifications = async () => {
       try {
         const response = await fetch('/api/notifications');
         if (!response.ok) throw new Error('فشل جلب الإشعارات');
@@ -72,7 +101,50 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       }
     };
 
-    fetchNotifications();
+    updateNotifications();
+
+    let pollingTimer: number | undefined;
+    let stream: EventSource | null = null;
+
+    if (typeof window !== 'undefined' && 'EventSource' in window) {
+      stream = new EventSource('/api/notifications/stream');
+
+      stream.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data);
+          let incoming: Array<{ id: number; title: string; body: string; read: boolean; url: string }> = [];
+
+          if (Array.isArray(payload)) {
+            incoming = payload;
+          } else if (payload && payload.id) {
+            incoming = [payload];
+          }
+
+          if (incoming.length > 0) {
+            setNotifications((prev) => [...incoming, ...prev]);
+            setUnreadCount((prev) => prev + incoming.filter((n) => !n.read).length);
+          }
+        } catch (error) {
+          console.error('SSE notification parse error', error);
+        }
+      };
+
+      stream.onerror = (error) => {
+        console.warn('SSE connection failed, using polling', error);
+        stream?.close();
+        stream = null;
+        pollingTimer = window.setInterval(updateNotifications, 30000);
+      };
+    } else {
+      pollingTimer = window.setInterval(updateNotifications, 30000);
+    }
+
+    return () => {
+      stream?.close();
+      if (pollingTimer) {
+        window.clearInterval(pollingTimer);
+      }
+    };
   }, []);
 
   useEffect(() => {
@@ -149,13 +221,36 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const flatNavItems = accessibleGroups.flatMap((groupItem) => groupItem.items);
 
   const gotoOptions = useMemo(
-    () =>
-      flatNavItems.map((item) => ({
+    () => [
+      { label: 'إنشاء قضية جديدة', href: '/create/case' },
+      { label: 'إنشاء عميل جديد', href: '/create/client' },
+      ...flatNavItems.map((item) => ({
         label: item.label,
         href: item.href,
       })),
+    ],
     [flatNavItems]
   );
+
+  const performGotoAction = (href: string) => {
+    if (href === '/create/case') {
+      setNewEntityModalOpen('case');
+      return;
+    }
+    if (href === '/create/client') {
+      setNewEntityModalOpen('client');
+      return;
+    }
+
+    const path = href.trim();
+    if (path.startsWith('/')) {
+      router.push(path);
+      return;
+    }
+
+    // fallback to route if no prefix matches
+    router.push(href);
+  };
 
   const filteredGotoOptions = useMemo(() => {
     const query = gotoQuery.trim().toLowerCase();
@@ -425,9 +520,16 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                   }
                   if (e.key === 'Enter') {
                     e.preventDefault();
+                    const customPath = gotoQuery.trim();
+                    if (customPath.startsWith('/')) {
+                      performGotoAction(customPath);
+                      setGotoModalOpen(false);
+                      return;
+                    }
+
                     const target = filteredGotoOptions[selectedGotoIndex];
                     if (target) {
-                      router.push(target.href);
+                      performGotoAction(target.href);
                       setGotoModalOpen(false);
                     }
                   }
@@ -447,7 +549,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                       type="button"
                       key={item.href}
                       onClick={() => {
-                        router.push(item.href);
+                        performGotoAction(item.href);
                         setGotoModalOpen(false);
                       }}
                       className={`w-full text-right px-3 py-2 text-sm ${index === selectedGotoIndex ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-800 dark:text-blue-200' : 'text-gray-700 dark:text-gray-200'} hover:bg-gray-100 dark:hover:bg-gray-700`}
@@ -465,6 +567,67 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 >
                   إلغاء
                 </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {newEntityModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
+            <div className="w-full max-w-md rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-4">
+              <h3 className="mb-2 text-lg font-semibold text-gray-900 dark:text-gray-100">
+                {newEntityModalOpen === 'case' ? 'إضافة قضية جديدة' : 'إضافة عميل جديد'}
+              </h3>
+              <div className="space-y-3 text-right">
+                <input
+                  type="text"
+                  value={newEntityTitle}
+                  onChange={(e) => setNewEntityTitle(e.target.value)}
+                  placeholder={newEntityModalOpen === 'case' ? 'عنوان القضية' : 'اسم العميل'}
+                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-right text-gray-800 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200"
+                />
+                <textarea
+                  value={newEntityDetails}
+                  onChange={(e) => setNewEntityDetails(e.target.value)}
+                  placeholder={newEntityModalOpen === 'case' ? 'تفاصيل القضية...' : 'تفاصيل العميل...'}
+                  rows={3}
+                  className="w-full resize-none rounded-md border border-gray-300 px-3 py-2 text-right text-gray-800 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200"
+                />
+                <div className="flex justify-between gap-2">
+                  <button
+                    className="rounded-md bg-gray-200 px-3 py-2 text-gray-700 dark:bg-gray-600 dark:text-gray-200"
+                    onClick={() => setNewEntityModalOpen(null)}
+                  >
+                    إلغاء
+                  </button>
+                  <button
+                    className="rounded-md bg-blue-600 px-3 py-2 text-white hover:bg-blue-700"
+                    onClick={() => {
+                      if (!newEntityTitle.trim()) return;
+                      const id = Date.now();
+                      const type = newEntityModalOpen;
+                      const itemLabel = type === 'case' ? 'قضية' : 'عميل';
+                      setNotifications((prev) => [
+                        {
+                          id,
+                          title: `${itemLabel} جديد: ${newEntityTitle.trim()}`,
+                          body: `${itemLabel} تمت إضافته بنجاح. ${newEntityDetails.trim()}`,
+                          read: false,
+                          url: type === 'case' ? '/cases' : '/clients',
+                        },
+                        ...prev,
+                      ]);
+                      setUnreadCount((prev) => prev + 1);
+                      setNewEntityTitle('');
+                      setNewEntityDetails('');
+                      setNewEntityModalOpen(null);
+                      setGotoModalOpen(false);
+                      router.push(type === 'case' ? '/cases' : '/clients');
+                    }}
+                  >
+                    حفظ
+                  </button>
+                </div>
               </div>
             </div>
           </div>
