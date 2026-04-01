@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/hooks/use-auth';
@@ -36,6 +36,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const [unreadCount, setUnreadCount] = useState(0);
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
   const [gotoModalOpen, setGotoModalOpen] = useState(false);
+  const [gotoQuery, setGotoQuery] = useState('');
+  const [selectedGotoIndex, setSelectedGotoIndex] = useState(0);
 
   const router = useRouter();
   const pathname = usePathname();
@@ -80,17 +82,24 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
       if (meta && event.key.toLowerCase() === 'k') {
         event.preventDefault();
-        setIsMobileMenuOpen((prev) => !prev);
+        setGotoModalOpen(true);
+        setGotoQuery('');
+        setSelectedGotoIndex(0);
+        setIsMobileMenuOpen(false);
       }
 
       if (event.key.toLowerCase() === 'g') {
         event.preventDefault();
         setGotoModalOpen(true);
+        setGotoQuery('');
+        setSelectedGotoIndex(0);
       }
 
       if (event.key === 'Escape') {
         setGotoModalOpen(false);
       }
+
+
     };
 
     window.addEventListener('keydown', handleKeyDown);
@@ -139,6 +148,29 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
   const flatNavItems = accessibleGroups.flatMap((groupItem) => groupItem.items);
 
+  const gotoOptions = useMemo(
+    () =>
+      flatNavItems.map((item) => ({
+        label: item.label,
+        href: item.href,
+      })),
+    [flatNavItems]
+  );
+
+  const filteredGotoOptions = useMemo(() => {
+    const query = gotoQuery.trim().toLowerCase();
+    if (!query) return gotoOptions;
+    return gotoOptions.filter((item) =>
+      item.label.toLowerCase().includes(query) || item.href.toLowerCase().includes(query)
+    );
+  }, [gotoOptions, gotoQuery]);
+
+  useEffect(() => {
+    if (selectedGotoIndex >= filteredGotoOptions.length) {
+      setSelectedGotoIndex(0);
+    }
+  }, [filteredGotoOptions, selectedGotoIndex]);
+
   const breadcrumbs = pathname
     .split('/')
     .filter(Boolean)
@@ -164,6 +196,11 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     clearUser();
     localStorage.removeItem('token');
     router.push('/login');
+  };
+
+  const markAllNotificationsRead = () => {
+    setNotifications((prev) => prev.map((note) => ({ ...note, read: true })));
+    setUnreadCount(0);
   };
 
   const closeMobileMenu = () => setIsMobileMenuOpen(false);
@@ -313,13 +350,25 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               <DropdownMenuContent className="w-80 mr-2 mt-2" align="end">
                 <DropdownMenuLabel>الإشعارات ({unreadCount})</DropdownMenuLabel>
                 <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={markAllNotificationsRead} className="justify-between">
+                  <span>تمييز الكل كمقروء</span>
+                  <span className="text-xs text-gray-500 dark:text-gray-400">{unreadCount} غير مقروءة</span>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
                 {notifications.length === 0 ? (
                   <div className="px-4 py-2 text-sm text-gray-500">لا توجد إشعارات</div>
                 ) : (
                   notifications.map((note) => (
-                    <DropdownMenuItem key={note.id} onSelect={() => router.push(note.url)}>
+                    <DropdownMenuItem
+                      key={note.id}
+                      onSelect={() => {
+                        router.push(note.url);
+                        setNotifications((prev) => prev.map((n) => (n.id === note.id ? { ...n, read: true } : n)));
+                        setUnreadCount((prev) => Math.max(0, prev - 1));
+                      }}
+                    >
                       <div className="text-right">
-                        <p className="text-sm font-semibold">{note.title}</p>
+                        <p className="text-sm font-semibold">{note.title} {note.read ? '' : '(جديد)'}</p>
                         <p className="text-xs text-gray-500 dark:text-gray-400">{note.body}</p>
                       </div>
                     </DropdownMenuItem>
@@ -356,35 +405,60 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           <div className="fixed inset-0 z-40 flex items-center justify-center bg-black bg-opacity-50 p-4">
             <div className="w-full max-w-md rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-4">
               <h3 className="mb-2 text-lg font-semibold text-gray-900 dark:text-gray-100">انتقال سريع</h3>
-              <p className="mb-3 text-sm text-gray-500 dark:text-gray-400">اكتب مسارًا للانتقال إليه (مثال: /cases).</p>
-              <div className="flex gap-2">
-                <input
-                  id="goto-input"
-                  type="text"
-                  className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-right text-gray-800 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200"
-                  placeholder="/cases"
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      const value = (e.target as HTMLInputElement).value.trim();
-                      if (value) {
-                        router.push(value);
-                        setGotoModalOpen(false);
-                      }
-                    }
-                  }}
-                />
-                <button
-                  className="rounded-md bg-blue-600 px-3 py-2 text-white hover:bg-blue-700"
-                  onClick={() => {
-                    const input = document.getElementById('goto-input') as HTMLInputElement | null;
-                    if (input?.value.trim()) {
-                      router.push(input.value.trim());
+              <p className="mb-3 text-sm text-gray-500 dark:text-gray-400">اكتب اسم صفحة أو مساراً للانتقال إليه بسرعة.</p>
+              <input
+                id="goto-input"
+                autoFocus
+                value={gotoQuery}
+                onChange={(e) => {
+                  setGotoQuery(e.target.value);
+                  setSelectedGotoIndex(0);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    setSelectedGotoIndex((prev) => (prev + 1) % Math.max(1, filteredGotoOptions.length));
+                  }
+                  if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    setSelectedGotoIndex((prev) => (prev - 1 + filteredGotoOptions.length) % Math.max(1, filteredGotoOptions.length));
+                  }
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    const target = filteredGotoOptions[selectedGotoIndex];
+                    if (target) {
+                      router.push(target.href);
                       setGotoModalOpen(false);
                     }
-                  }}
-                >
-                  انتقال
-                </button>
+                  }
+                  if (e.key === 'Escape') {
+                    setGotoModalOpen(false);
+                  }
+                }}
+                placeholder="ابحث أو اكتب مسارًا..."
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-right text-gray-800 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200"
+              />
+              <div className="mt-3 max-h-56 overflow-y-auto rounded-md border border-gray-200 dark:border-gray-700">
+                {filteredGotoOptions.length === 0 ? (
+                  <div className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">لا توجد نتائج.</div>
+                ) : (
+                  filteredGotoOptions.map((item, index) => (
+                    <button
+                      type="button"
+                      key={item.href}
+                      onClick={() => {
+                        router.push(item.href);
+                        setGotoModalOpen(false);
+                      }}
+                      className={`w-full text-right px-3 py-2 text-sm ${index === selectedGotoIndex ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-800 dark:text-blue-200' : 'text-gray-700 dark:text-gray-200'} hover:bg-gray-100 dark:hover:bg-gray-700`}
+                    >
+                      <div className="font-medium">{item.label}</div>
+                      <div className="text-xs text-gray-500 dark:text-gray-400">{item.href}</div>
+                    </button>
+                  ))
+                )}
+              </div>
+              <div className="mt-3 flex justify-end gap-2">
                 <button
                   className="rounded-md bg-gray-200 px-3 py-2 text-gray-700 dark:bg-gray-600 dark:text-gray-200"
                   onClick={() => setGotoModalOpen(false)}
