@@ -4,7 +4,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/hooks/use-auth';
-import { getDashboardSummary, getUrgentCases, legalCases, legalClients } from '@/lib/legal-dashboard-data';
+import { useDashboardStore } from '@/store/use-dashboard-store';
+import { getDashboardSummary, getUrgentCases } from '@/lib/legal-dashboard-data';
 import { 
   DropdownMenu, 
   DropdownMenuContent, 
@@ -27,19 +28,37 @@ import {
   Menu,
   X
 } from 'lucide-react';
+import { io, Socket } from 'socket.io-client';
 import Link from 'next/link';
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [notifications, setNotifications] = useState<Array<{ id: number; title: string; body: string; read: boolean; url: string }>>([]);
-  const [unreadCount, setUnreadCount] = useState(0);
+
+  const searchQuery = useDashboardStore((state) => state.searchQuery);
+  const setSearchQuery = useDashboardStore((state) => state.setSearchQuery);
+
+  const gotoQuery = useDashboardStore((state) => state.gotoQuery);
+  const setGotoQuery = useDashboardStore((state) => state.setGotoQuery);
+
+  const notifications = useDashboardStore((state) => state.notifications);
+  const setNotifications = useDashboardStore((state) => state.setNotifications);
+
+  const unreadCount = useDashboardStore((state) => state.unreadCount);
+  const setUnreadCount = useDashboardStore((state) => state.setUnreadCount);
+
+  const wsConnected = useDashboardStore((state) => state.wsConnected);
+  const setWsConnected = useDashboardStore((state) => state.setWsConnected);
+
+  const wsToken = useDashboardStore((state) => state.wsToken);
+  const setWsToken = useDashboardStore((state) => state.setWsToken);
+
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
   const [gotoModalOpen, setGotoModalOpen] = useState(false);
-  const [gotoQuery, setGotoQuery] = useState('');
   const [selectedGotoIndex, setSelectedGotoIndex] = useState(0);
   const [newEntityModalOpen, setNewEntityModalOpen] = useState<null | 'case' | 'client'>(null);
+  const [wsTokenModalOpen, setWsTokenModalOpen] = useState(false);
+  const [wsTokenDraft, setWsTokenDraft] = useState(wsToken);
   const [newEntityTitle, setNewEntityTitle] = useState('');
   const [newEntityDetails, setNewEntityDetails] = useState('');
 
@@ -67,6 +86,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     const savedCollapsed = localStorage.getItem('lawpro-collapsedGroups');
     const savedGoto = localStorage.getItem('lawpro-goto-query');
     const savedSearch = localStorage.getItem('lawpro-nav-search');
+    const savedToken = localStorage.getItem('lawpro-ws-token');
 
     if (savedMenu !== null) {
       setIsMobileMenuOpen(savedMenu === 'true');
@@ -88,14 +108,27 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     if (savedSearch !== null) {
       setSearchQuery(savedSearch);
     }
-  }, []);
+
+    if (savedToken !== null) {
+      setWsToken(savedToken);
+    }
+  }, [setSearchQuery, setGotoQuery, setWsToken]);
+
+  useEffect(() => {
+    setWsTokenDraft(wsToken);
+  }, [wsToken]);
 
   useEffect(() => {
     localStorage.setItem('lawpro-nav-search', searchQuery);
   }, [searchQuery]);
+
   useEffect(() => {
     localStorage.setItem('lawpro-goto-query', gotoQuery);
   }, [gotoQuery]);
+
+  useEffect(() => {
+    localStorage.setItem('lawpro-ws-token', wsToken);
+  }, [wsToken]);
 
   useEffect(() => {
     localStorage.setItem('lawpro-mobileMenuOpen', String(isMobileMenuOpen));
@@ -104,8 +137,6 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     localStorage.setItem('lawpro-collapsedGroups', JSON.stringify(collapsedGroups));
   }, [collapsedGroups]);
-
-  const [wsConnected, setWsConnected] = useState(false);
 
   useEffect(() => {
     const updateNotifications = async () => {
@@ -125,7 +156,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
     let pollingTimer: number | undefined;
     let stream: EventSource | null = null;
-    let ws: WebSocket | null = null;
+    let socket: Socket | null = null;
 
     const connectSSE = () => {
       if (stream) return;
@@ -153,17 +184,23 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       };
     };
 
-    const connectWebSocket = () => {
-      if (typeof window === 'undefined' || !('WebSocket' in window)) {
+    const connectSocketIO = () => {
+      if (typeof window === 'undefined') {
         connectSSE();
         return;
       }
 
-      const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-      const wsUrl = `${protocol}://${window.location.hostname}:8080`;
-      ws = new WebSocket(wsUrl);
+      const protocol = window.location.protocol === 'https:' ? 'https' : 'http';
+      const url = `${protocol}://${window.location.hostname}:8080`;
+      const effectiveToken = wsToken || token || 'local-token';
 
-      ws.onopen = () => {
+      socket = io(url, {
+        transports: ['websocket'],
+        auth: { token: effectiveToken },
+        query: { token: effectiveToken },
+      });
+
+      socket.on('connect', () => {
         setWsConnected(true);
         if (pollingTimer) {
           window.clearInterval(pollingTimer);
@@ -173,47 +210,45 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           stream.close();
           stream = null;
         }
-      };
+      });
 
-      ws.onmessage = (event) => {
-        try {
-          const payload = JSON.parse(event.data);
-          if (payload && payload.title) {
-            const incoming = [{ ...payload, read: payload.read ?? false, id: payload.id ?? Date.now(), url: payload.url ?? '/cases' }];
-            setNotifications((prev) => [...incoming, ...prev]);
-            setUnreadCount((prev) => prev + incoming.filter((n) => !n.read).length);
-          }
-        } catch (error) {
-          console.error('WS notification parse error', error);
+      socket.on('welcome', (message: { title?: string; body?: string }) => {
+        console.log('Socket.io welcome', message);
+      });
+
+      socket.on('notification', (payload: { title?: string; body?: string; url?: string; id?: number; read?: boolean }) => {
+        if (payload && payload.title) {
+          const incoming = [{ ...payload, read: payload.read ?? false, id: payload.id ?? Date.now(), url: payload.url ?? '/cases' }];
+          setNotifications((prev) => [...incoming, ...prev]);
+          setUnreadCount((prev) => prev + incoming.filter((n) => !n.read).length);
         }
-      };
+      });
 
-      ws.onclose = () => {
+      socket.on('disconnect', () => {
         setWsConnected(false);
-        ws = null;
         pollingTimer = window.setInterval(updateNotifications, 30000);
         connectSSE();
-      };
+      });
 
-      ws.onerror = (error) => {
-        console.error('WebSocket error, falling back to SSE', error);
+      socket.on('connect_error', (error) => {
+        console.error('Socket.IO connect error', error);
         setWsConnected(false);
-        ws?.close();
-        ws = null;
+        socket?.disconnect();
+        socket = null;
         connectSSE();
-      };
+      });
     };
 
-    connectWebSocket();
+    connectSocketIO();
 
     return () => {
-      ws?.close();
+      socket?.disconnect();
       stream?.close();
       if (pollingTimer) {
         window.clearInterval(pollingTimer);
       }
     };
-  }, []);
+  }, [wsToken, setNotifications, setUnreadCount, setWsConnected, token]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -244,9 +279,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [setGotoModalOpen, setGotoQuery, setSelectedGotoIndex, setIsMobileMenuOpen]);
 
-  const { role, userName, userEmail, setUser, clearUser } = useAuth();
+  const { token, role, userName, userEmail, setUser, clearUser } = useAuth();
 
   useEffect(() => {
     if (!role) {
@@ -315,7 +350,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     }
 
     if (href === 'action:urgent-cases') {
-      localStorage.setItem('lawpro-cases-status', 'urgent');
+      localStorage.setItem('lawpro-cases-status', 'عاجلة');
       setNotifications((prev) => [
         {
           id: Date.now(),
@@ -604,6 +639,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             <div className="rounded-full border border-gray-300 px-2 py-1 text-xs font-semibold text-gray-700 dark:border-gray-600 dark:text-gray-200">
               {wsConnected ? 'WS متصل' : 'SSE / Polling'}
             </div>
+            <Button variant="outline" size="icon" onClick={() => { setWsTokenDraft(wsToken); setWsTokenModalOpen(true); }} aria-label="WS token">
+              <span className="text-[10px]">Token</span>
+            </Button>
             <Button variant="ghost" size="icon" onClick={() => setIsDarkMode((prev) => !prev)} aria-label="Toggle theme">
               {isDarkMode ? <Sun className="h-5 w-5 text-yellow-500" /> : <Moon className="h-5 w-5 text-gray-600 dark:text-gray-400" />}
             </Button>
@@ -771,6 +809,37 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                   onClick={() => setGotoModalOpen(false)}
                 >
                   إلغاء
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {wsTokenModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
+            <div className="w-full max-w-md rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-4">
+              <h3 className="mb-2 text-lg font-semibold text-gray-900 dark:text-gray-100">رمز WS</h3>
+              <input
+                value={wsTokenDraft}
+                onChange={(e) => setWsTokenDraft(e.target.value)}
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-right text-gray-800 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200"
+              />
+              <div className="mt-3 flex justify-end gap-2">
+                <button
+                  className="rounded-md bg-gray-200 px-3 py-2 text-gray-700 dark:bg-gray-600 dark:text-gray-200"
+                  onClick={() => setWsTokenModalOpen(false)}
+                >
+                  إلغاء
+                </button>
+                <button
+                  className="rounded-md bg-blue-600 px-3 py-2 text-white hover:bg-blue-700"
+                  onClick={() => {
+                    setWsToken(wsTokenDraft.trim() || 'local-token');
+                    setWsTokenModalOpen(false);
+                    setWsConnected(false);
+                  }}
+                >
+                  حفظ
                 </button>
               </div>
             </div>

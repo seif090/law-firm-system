@@ -1,31 +1,33 @@
-const WebSocket = require('ws');
+import { Server } from 'socket.io';
 
 const port = process.env.WS_PORT ? Number(process.env.WS_PORT) : 8080;
-const wss = new WebSocket.Server({ port });
+const io = new Server(port, {
+  cors: {
+    origin: '*',
+    methods: ['GET', 'POST'],
+  },
+});
 
-wss.on('connection', (socket) => {
-  console.log('WebSocket client connected');
-  socket.send(JSON.stringify({ type: 'welcome', title: 'WS Connected', body: 'تم الاتصال بخادم WS' }));
+io.use((socket, next) => {
+  const token = socket.handshake.query.token || socket.handshake.auth.token;
+  if (!token || token !== 'local-token') {
+    return next(new Error('Unauthorized'));
+  }
+  next();
+});
 
-  socket.on('message', (message) => {
-    try {
-      const data = JSON.parse(message);
-      if (data && data.type === 'broadcast') {
-        const payload = { ...data.payload, id: Date.now(), read: false };
-        wss.clients.forEach((client) => {
-          if (client.readyState === WebSocket.OPEN) {
-            client.send(JSON.stringify(payload));
-          }
-        });
-      }
-    } catch (err) {
-      console.error('Invalid WS message', err);
-    }
+io.on('connection', (socket) => {
+  console.log('Socket.IO client connected', socket.id);
+  socket.emit('welcome', { title: 'WS Connected', body: 'تم الاتصال بخادم Socket.IO' });
+
+  socket.on('broadcast', (payload) => {
+    const message = { ...payload, id: Date.now(), read: false };
+    io.emit('notification', message);
   });
 
-  socket.on('close', () => {
-    console.log('WebSocket client disconnected');
+  socket.on('disconnect', (reason) => {
+    console.log('Socket.IO client disconnected', socket.id, reason);
   });
 });
 
-console.log(`WebSocket server running on ws://localhost:${port}`);
+console.log(`Socket.IO server running on ws://localhost:${port}`);

@@ -44,6 +44,7 @@ export type LegalActivity = {
   detail: string;
   timestamp: string;
   type: 'case' | 'client' | 'task' | 'hearing';
+  entityId?: number;
 };
 
 export type DashboardSummary = {
@@ -299,6 +300,7 @@ export const legalActivities: LegalActivity[] = [
     detail: 'أضيفت ملاحظات الشريك القانوني على المسودة النهائية.',
     timestamp: daysFromNow(-1),
     type: 'case',
+    entityId: 101,
   },
   {
     id: 302,
@@ -306,6 +308,7 @@ export const legalActivities: LegalActivity[] = [
     detail: 'تم الاتفاق على إرسال المستندات الناقصة عبر البريد الإلكتروني.',
     timestamp: daysFromNow(-2),
     type: 'client',
+    entityId: 1,
   },
   {
     id: 303,

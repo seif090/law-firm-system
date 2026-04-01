@@ -1,28 +1,32 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import Layout from '@/components/layout/main-layout';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { useDashboardStore } from '@/store/use-dashboard-store';
 import { filterCases, getDashboardSummary } from '@/lib/legal-dashboard-data';
 
-const statusOptions = ['الكل', 'جارية', 'معلقة', 'مغلقة'] as const;
+type CaseStatusOption = 'الكل' | 'جارية' | 'معلقة' | 'مغلقة' | 'عاجلة';
+const statusOptions: CaseStatusOption[] = ['الكل', 'جارية', 'معلقة', 'مغلقة', 'عاجلة'];
 
 const formatDate = (value: string) =>
   new Intl.DateTimeFormat('ar-EG', { day: 'numeric', month: 'short' }).format(new Date(value));
 
 export default function CasesPage() {
-  const [query, setQuery] = useState('');
-  const [status, setStatus] = useState<(typeof statusOptions)[number]>('الكل');
+  const query = useDashboardStore((state) => state.casesQuery);
+  const setQuery = useDashboardStore((state) => state.setCasesQuery);
+  const status = useDashboardStore((state) => state.casesStatus);
+  const setStatus = useDashboardStore((state) => state.setCasesStatus);
 
   useEffect(() => {
     const savedQuery = localStorage.getItem('lawpro-cases-query');
     const savedStatus = localStorage.getItem('lawpro-cases-status');
     if (savedQuery !== null) setQuery(savedQuery);
-    if (savedStatus && statusOptions.includes(savedStatus as any)) setStatus(savedStatus as any);
-  }, []);
+    if (savedStatus && statusOptions.includes(savedStatus as CaseStatusOption)) setStatus(savedStatus as CaseStatusOption);
+  }, [setQuery, setStatus]);
 
   useEffect(() => {
     localStorage.setItem('lawpro-cases-query', query);
@@ -32,7 +36,8 @@ export default function CasesPage() {
     localStorage.setItem('lawpro-cases-status', status);
   }, [status]);
 
-  const cases = useMemo(() => filterCases(query, status), [query, status]);
+  const normalizedStatus = status === 'عاجلة' ? 'urgent' : (status as 'الكل' | 'جارية' | 'معلقة' | 'مغلقة');
+  const cases = useMemo(() => filterCases(query, normalizedStatus), [query, normalizedStatus]);
   const summary = getDashboardSummary();
 
   return (

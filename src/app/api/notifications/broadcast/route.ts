@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
-import WebSocket from 'ws';
+import { io } from 'socket.io-client';
 
-const WS_URL = process.env.WS_URL || 'ws://localhost:8080';
+const WS_URL = process.env.WS_URL || 'http://localhost:8080';
 
 export async function POST(request: Request) {
   try {
@@ -25,15 +25,29 @@ export async function POST(request: Request) {
       severity: data.severity || 'info',
     };
 
-    const ws = new WebSocket(WS_URL);
+    const socket = io(WS_URL, {
+      transports: ['websocket'],
+      auth: { token },
+      query: { token },
+      autoConnect: false,
+    });
 
     await new Promise<void>((resolve, reject) => {
-      ws.on('open', () => {
-        ws.send(JSON.stringify({ type: 'broadcast', payload }));
-        ws.close();
+      socket.connect();
+
+      socket.on('connect', () => {
+        socket.emit('broadcast', payload);
+        socket.disconnect();
         resolve();
       });
-      ws.on('error', (err) => reject(err));
+
+      socket.on('connect_error', (err) => {
+        reject(err);
+      });
+
+      socket.on('error', (err) => {
+        reject(err);
+      });
     });
 
     return NextResponse.json({ ok: true, message: 'Broadcast notification sent.' });

@@ -1,22 +1,24 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import Layout from '@/components/layout/main-layout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { useDashboardStore } from '@/store/use-dashboard-store';
 import { filterClients, getDashboardSummary } from '@/lib/legal-dashboard-data';
 
 const formatDate = (value: string) =>
   new Intl.DateTimeFormat('ar-EG', { day: 'numeric', month: 'short' }).format(new Date(value));
 
 export default function ClientsPage() {
-  const [query, setQuery] = useState('');
+  const query = useDashboardStore((state) => state.clientsQuery);
+  const setQuery = useDashboardStore((state) => state.setClientsQuery);
 
   useEffect(() => {
     const savedQuery = localStorage.getItem('lawpro-clients-query');
     if (savedQuery !== null) setQuery(savedQuery);
-  }, []);
+  }, [setQuery]);
 
   useEffect(() => {
     localStorage.setItem('lawpro-clients-query', query);
