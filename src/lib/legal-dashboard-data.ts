@@ -386,11 +386,20 @@ export const getUpcomingDeadlines = () =>
     .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime())
     .slice(0, 5);
 
-export const filterCases = (query: string, status: 'الكل' | CaseStatus) =>
+export type CasesStatusFilter = 'الكل' | CaseStatus | 'urgent';
+
+export const filterCases = (query: string, status: CasesStatusFilter) =>
   legalCases.filter((item) => {
     const searchable = `${item.title} ${item.client} ${item.summary} ${item.stage}`.toLowerCase();
     const matchesQuery = query.trim() ? searchable.includes(query.trim().toLowerCase()) : true;
-    const matchesStatus = status === 'الكل' ? true : item.status === status;
+
+    let matchesStatus = true;
+    if (status === 'urgent') {
+      matchesStatus = item.status === 'معلقة' || item.priority === 'عالية';
+    } else if (status !== 'الكل') {
+      matchesStatus = item.status === status;
+    }
+
     return matchesQuery && matchesStatus;
   });
 

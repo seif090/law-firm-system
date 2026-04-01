@@ -65,6 +65,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const savedMenu = localStorage.getItem('lawpro-mobileMenuOpen');
     const savedCollapsed = localStorage.getItem('lawpro-collapsedGroups');
+    const savedGoto = localStorage.getItem('lawpro-goto-query');
+    const savedSearch = localStorage.getItem('lawpro-nav-search');
 
     if (savedMenu !== null) {
       setIsMobileMenuOpen(savedMenu === 'true');
@@ -78,7 +80,22 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         console.warn('فشل تحليل collapsedGroups من localStorage', error);
       }
     }
+
+    if (savedGoto !== null) {
+      setGotoQuery(savedGoto);
+    }
+
+    if (savedSearch !== null) {
+      setSearchQuery(savedSearch);
+    }
   }, []);
+
+  useEffect(() => {
+    localStorage.setItem('lawpro-nav-search', searchQuery);
+  }, [searchQuery]);
+  useEffect(() => {
+    localStorage.setItem('lawpro-goto-query', gotoQuery);
+  }, [gotoQuery]);
 
   useEffect(() => {
     localStorage.setItem('lawpro-mobileMenuOpen', String(isMobileMenuOpen));
@@ -87,6 +104,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     localStorage.setItem('lawpro-collapsedGroups', JSON.stringify(collapsedGroups));
   }, [collapsedGroups]);
+
+  const [wsConnected, setWsConnected] = useState(false);
 
   useEffect(() => {
     const updateNotifications = async () => {
@@ -106,20 +125,16 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
     let pollingTimer: number | undefined;
     let stream: EventSource | null = null;
+    let ws: WebSocket | null = null;
 
-    if (typeof window !== 'undefined' && 'EventSource' in window) {
+    const connectSSE = () => {
+      if (stream) return;
       stream = new EventSource('/api/notifications/stream');
 
       stream.onmessage = (event) => {
         try {
           const payload = JSON.parse(event.data);
-          let incoming: Array<{ id: number; title: string; body: string; read: boolean; url: string }> = [];
-
-          if (Array.isArray(payload)) {
-            incoming = payload;
-          } else if (payload && payload.id) {
-            incoming = [payload];
-          }
+          const incoming = Array.isArray(payload) ? payload : payload?.id ? [payload] : [];
 
           if (incoming.length > 0) {
             setNotifications((prev) => [...incoming, ...prev]);
@@ -131,16 +146,68 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       };
 
       stream.onerror = (error) => {
-        console.warn('SSE connection failed, using polling', error);
+        console.warn('SSE connection error, switching to polling', error);
         stream?.close();
         stream = null;
         pollingTimer = window.setInterval(updateNotifications, 30000);
       };
-    } else {
-      pollingTimer = window.setInterval(updateNotifications, 30000);
-    }
+    };
+
+    const connectWebSocket = () => {
+      if (typeof window === 'undefined' || !('WebSocket' in window)) {
+        connectSSE();
+        return;
+      }
+
+      const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+      const wsUrl = `${protocol}://${window.location.hostname}:8080`;
+      ws = new WebSocket(wsUrl);
+
+      ws.onopen = () => {
+        setWsConnected(true);
+        if (pollingTimer) {
+          window.clearInterval(pollingTimer);
+          pollingTimer = undefined;
+        }
+        if (stream) {
+          stream.close();
+          stream = null;
+        }
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data);
+          if (payload && payload.title) {
+            const incoming = [{ ...payload, read: payload.read ?? false, id: payload.id ?? Date.now(), url: payload.url ?? '/cases' }];
+            setNotifications((prev) => [...incoming, ...prev]);
+            setUnreadCount((prev) => prev + incoming.filter((n) => !n.read).length);
+          }
+        } catch (error) {
+          console.error('WS notification parse error', error);
+        }
+      };
+
+      ws.onclose = () => {
+        setWsConnected(false);
+        ws = null;
+        pollingTimer = window.setInterval(updateNotifications, 30000);
+        connectSSE();
+      };
+
+      ws.onerror = (error) => {
+        console.error('WebSocket error, falling back to SSE', error);
+        setWsConnected(false);
+        ws?.close();
+        ws = null;
+        connectSSE();
+      };
+    };
+
+    connectWebSocket();
 
     return () => {
+      ws?.close();
       stream?.close();
       if (pollingTimer) {
         window.clearInterval(pollingTimer);
@@ -227,6 +294,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       { label: 'إنشاء عميل جديد', href: '/create/client' },
       { label: 'عرض القضايا العاجلة', href: 'action:urgent-cases' },
       { label: 'عرض أفضل العملاء', href: 'action:top-clients' },
+      { label: 'أضف تذكير جلسة لـ X', href: 'bot:remind' },
+      { label: 'خصص مهمة للموظف', href: 'bot:assign-task' },
       ...flatNavItems.map((item) => ({
         label: item.label,
         href: item.href,
@@ -246,6 +315,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     }
 
     if (href === 'action:urgent-cases') {
+      localStorage.setItem('lawpro-cases-status', 'urgent');
       setNotifications((prev) => [
         {
           id: Date.now(),
@@ -274,6 +344,41 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       ]);
       setUnreadCount((prev) => prev + 1);
       router.push('/clients');
+      return;
+    }
+
+    if (href === 'bot:remind' || href.startsWith('bot:remind:')) {
+      const target = href === 'bot:remind' ? 'X' : href.replace('bot:remind:', '');
+      const reminderText = `تذكير جلسة لـ ${target} تم إضافة طلب. يمكنك إدارة التفاصيل من لوحة المتابعة.`;
+      setNotifications((prev) => [
+        {
+          id: Date.now(),
+          title: 'تذكير جلسة جديد',
+          body: reminderText,
+          read: false,
+          url: '/calendar',
+        },
+        ...prev,
+      ]);
+      setUnreadCount((prev) => prev + 1);
+      router.push('/calendar');
+      return;
+    }
+
+    if (href === 'bot:assign-task' || href.startsWith('bot:assign-task:')) {
+      const details = href === 'bot:assign-task' ? 'مهمة عامة' : href.replace('bot:assign-task:', '');
+      setNotifications((prev) => [
+        {
+          id: Date.now(),
+          title: 'مهمة جديدة',
+          body: `تم تعيين: ${details}`,
+          read: false,
+          url: '/cases',
+        },
+        ...prev,
+      ]);
+      setUnreadCount((prev) => prev + 1);
+      router.push('/cases');
       return;
     }
 
@@ -496,6 +601,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           </div>
           
           <div className="flex items-center space-x-4">
+            <div className="rounded-full border border-gray-300 px-2 py-1 text-xs font-semibold text-gray-700 dark:border-gray-600 dark:text-gray-200">
+              {wsConnected ? 'WS متصل' : 'SSE / Polling'}
+            </div>
             <Button variant="ghost" size="icon" onClick={() => setIsDarkMode((prev) => !prev)} aria-label="Toggle theme">
               {isDarkMode ? <Sun className="h-5 w-5 text-yellow-500" /> : <Moon className="h-5 w-5 text-gray-600 dark:text-gray-400" />}
             </Button>
@@ -599,12 +707,27 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                     const directCase = customPath.match(/^case\s+(\d+)$/i);
                     const directClient = customPath.match(/^client\s+(\d+)$/i);
                     if (directCase) {
-                      performGotoAction(`case ${directCase[1]}`);
+                      performGotoAction(`/cases/${directCase[1]}`);
                       setGotoModalOpen(false);
                       return;
                     }
                     if (directClient) {
-                      performGotoAction(`client ${directClient[1]}`);
+                      performGotoAction(`/clients/${directClient[1]}`);
+                      setGotoModalOpen(false);
+                      return;
+                    }
+
+                    // أوامر البوت
+                    const remindMatch = customPath.match(/^remind\s+(.+)$/i);
+                    if (remindMatch) {
+                      performGotoAction(`bot:remind:${remindMatch[1].trim()}`);
+                      setGotoModalOpen(false);
+                      return;
+                    }
+
+                    const assignMatch = customPath.match(/^assign\s+(.+)$/i);
+                    if (assignMatch) {
+                      performGotoAction(`bot:assign-task:${assignMatch[1].trim()}`);
                       setGotoModalOpen(false);
                       return;
                     }

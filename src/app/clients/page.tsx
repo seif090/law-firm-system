@@ -1,6 +1,7 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import Layout from '@/components/layout/main-layout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -11,6 +12,16 @@ const formatDate = (value: string) =>
 
 export default function ClientsPage() {
   const [query, setQuery] = useState('');
+
+  useEffect(() => {
+    const savedQuery = localStorage.getItem('lawpro-clients-query');
+    if (savedQuery !== null) setQuery(savedQuery);
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem('lawpro-clients-query', query);
+  }, [query]);
+
   const clients = useMemo(() => filterClients(query), [query]);
   const summary = getDashboardSummary();
 
@@ -48,6 +59,12 @@ export default function ClientsPage() {
                 <p>القضايا النشطة: {client.activeCases}</p>
                 <p>مستوى المخاطر: {client.riskLevel}</p>
                 <p>آخر تواصل: {formatDate(client.lastContact)}</p>
+                <Link
+                  href={`/clients/${client.id}`}
+                  className="text-sm font-medium text-blue-600 hover:underline dark:text-blue-400"
+                >
+                  عرض تفاصيل العميل
+                </Link>
               </CardContent>
             </Card>
           ))}

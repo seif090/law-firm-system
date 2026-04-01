@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "ws-server": "node scripts/ws-server.js"
   },
   "dependencies": {
     "@radix-ui/react-alert-dialog": "^1.1.15",

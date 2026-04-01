@@ -1,6 +1,7 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import Layout from '@/components/layout/main-layout';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -15,6 +16,21 @@ const formatDate = (value: string) =>
 export default function CasesPage() {
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState<(typeof statusOptions)[number]>('الكل');
+
+  useEffect(() => {
+    const savedQuery = localStorage.getItem('lawpro-cases-query');
+    const savedStatus = localStorage.getItem('lawpro-cases-status');
+    if (savedQuery !== null) setQuery(savedQuery);
+    if (savedStatus && statusOptions.includes(savedStatus as any)) setStatus(savedStatus as any);
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem('lawpro-cases-query', query);
+  }, [query]);
+
+  useEffect(() => {
+    localStorage.setItem('lawpro-cases-status', status);
+  }, [status]);
 
   const cases = useMemo(() => filterCases(query, status), [query, status]);
   const summary = getDashboardSummary();
@@ -61,6 +77,12 @@ export default function CasesPage() {
                   <span className="rounded-full bg-slate-100 px-2.5 py-1 dark:bg-slate-800">تحديث {formatDate(item.updatedAt)}</span>
                   <span className="rounded-full bg-slate-100 px-2.5 py-1 dark:bg-slate-800">استحقاق {formatDate(item.dueDate)}</span>
                 </div>
+                <Link
+                  href={`/cases/${item.id}`}
+                  className="text-sm font-medium text-blue-600 hover:underline dark:text-blue-400"
+                >
+                  عرض تفاصيل القضية
+                </Link>
               </CardContent>
             </Card>
           ))}
