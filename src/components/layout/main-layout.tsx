@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/hooks/use-auth';
+import { getDashboardSummary, getUrgentCases, legalCases, legalClients } from '@/lib/legal-dashboard-data';
 import { 
   DropdownMenu, 
   DropdownMenuContent, 
@@ -224,6 +225,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     () => [
       { label: 'إنشاء قضية جديدة', href: '/create/case' },
       { label: 'إنشاء عميل جديد', href: '/create/client' },
+      { label: 'عرض القضايا العاجلة', href: 'action:urgent-cases' },
+      { label: 'عرض أفضل العملاء', href: 'action:top-clients' },
       ...flatNavItems.map((item) => ({
         label: item.label,
         href: item.href,
@@ -242,13 +245,70 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       return;
     }
 
+    if (href === 'action:urgent-cases') {
+      setNotifications((prev) => [
+        {
+          id: Date.now(),
+          title: 'القضايا العاجلة',
+          body: 'عرض الحالات ذات الأولوية العالية والمعلقة.',
+          read: false,
+          url: '/cases',
+        },
+        ...prev,
+      ]);
+      setUnreadCount((prev) => prev + 1);
+      router.push('/cases');
+      return;
+    }
+
+    if (href === 'action:top-clients') {
+      setNotifications((prev) => [
+        {
+          id: Date.now(),
+          title: 'أعلى العملاء نشاطًا',
+          body: 'انتقل وعرض أعلى عملاء بحسب عدد القضايا النشطة.',
+          read: false,
+          url: '/clients',
+        },
+        ...prev,
+      ]);
+      setUnreadCount((prev) => prev + 1);
+      router.push('/clients');
+      return;
+    }
+
     const path = href.trim();
+
+    // دعم /cases/123 و /clients/123
+    const caseMatch = path.match(/^\/cases\/(\d+)$/);
+    const clientMatch = path.match(/^\/clients\/(\d+)$/);
+    if (caseMatch) {
+      router.push(path);
+      return;
+    }
+    if (clientMatch) {
+      router.push(path);
+      return;
+    }
+
+    // دعم صيغة الأمر النصي: "case 101" أو "client 3"
+    const directCase = href.match(/^case\s+(\d+)$/i);
+    const directClient = href.match(/^client\s+(\d+)$/i);
+    if (directCase) {
+      router.push(`/cases/${directCase[1]}`);
+      return;
+    }
+    if (directClient) {
+      router.push(`/clients/${directClient[1]}`);
+      return;
+    }
+
     if (path.startsWith('/')) {
       router.push(path);
       return;
     }
 
-    // fallback to route if no prefix matches
+    // fallback route
     router.push(href);
   };
 
@@ -273,6 +333,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       label: flatNavItems.find((item) => item.href === `/${segment}`)?.label ?? segment,
       href: `/${arr.slice(0, index + 1).join('/')}`,
     }));
+
+  const dashboardSummary = useMemo(() => getDashboardSummary(), []);
+  const urgentCases = useMemo(() => getUrgentCases(), []);
 
   const activeRouteLabel =
     flatNavItems.find((item) => pathname === item.href || pathname.startsWith(`${item.href}/`))?.label ?? 'لوحة التحكم';
@@ -425,6 +488,11 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 ))}
               </nav>
             </div>
+            <div className="mt-1 flex gap-3 text-xs text-gray-600 dark:text-gray-300">
+              <span className="rounded-full bg-orange-100 px-2 py-1 dark:bg-orange-900/30">قضايا عاجلة: {urgentCases.length}</span>
+              <span className="rounded-full bg-sky-100 px-2 py-1 dark:bg-sky-900/30">قضايا نشطة: {dashboardSummary.activeCases}</span>
+              <span className="rounded-full bg-green-100 px-2 py-1 dark:bg-green-900/30">أقرب استحقاق: {dashboardSummary.nextDeadline || 'لا يوجد'}</span>
+            </div>
           </div>
           
           <div className="flex items-center space-x-4">
@@ -523,6 +591,20 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                     const customPath = gotoQuery.trim();
                     if (customPath.startsWith('/')) {
                       performGotoAction(customPath);
+                      setGotoModalOpen(false);
+                      return;
+                    }
+
+                    // دعم "case 106" و "client 3" مباشرة من الحقل
+                    const directCase = customPath.match(/^case\s+(\d+)$/i);
+                    const directClient = customPath.match(/^client\s+(\d+)$/i);
+                    if (directCase) {
+                      performGotoAction(`case ${directCase[1]}`);
+                      setGotoModalOpen(false);
+                      return;
+                    }
+                    if (directClient) {
+                      performGotoAction(`client ${directClient[1]}`);
                       setGotoModalOpen(false);
                       return;
                     }
